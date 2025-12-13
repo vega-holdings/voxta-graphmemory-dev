@@ -1,5 +1,11 @@
 namespace Voxta.Modules.GraphMemory.Memory;
 
+public enum GraphExtractionTrigger
+{
+    EveryTurn,
+    OnlyOnMemoryGeneration,
+}
+
 public class GraphMemorySettings
 {
     public required string GraphPath { get; init; }
@@ -9,6 +15,7 @@ public class GraphMemorySettings
     public required string GraphExtractionPromptPath { get; init; }
     public bool EnablePlaceholderExtraction { get; init; }
     public bool EnableGraphExtraction { get; init; }
+    public GraphExtractionTrigger GraphExtractionTrigger { get; init; } = GraphExtractionTrigger.OnlyOnMemoryGeneration;
     public bool PrefillMemoryWindow { get; init; }
     public int MaxMemoryWindowEntries { get; init; }
     public int ExpireMemoriesAfter { get; init; }

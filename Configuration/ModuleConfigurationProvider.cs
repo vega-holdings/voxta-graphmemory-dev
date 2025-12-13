@@ -6,6 +6,7 @@ using Voxta.Abstractions.Registration;
 using Voxta.Abstractions.Security;
 using Voxta.Model.Shared.Forms;
 using Voxta.Shared.HuggingFaceUtils;
+using Voxta.Modules.GraphMemory.Memory;
 
 namespace Voxta.Modules.GraphMemory.Configuration;
 
@@ -15,7 +16,15 @@ public class ModuleConfigurationProvider(
     ILogger<ModuleConfigurationProvider> logger
 ) : ModuleConfigurationProviderBase, IModuleConfigurationProvider
 {
-    public static string[] FieldsRequiringReload => [GraphPath.Name, EmbeddingModel.Name, ModelsDirectory.Name, ExtractionPromptPath.Name, GraphExtractionPromptPath.Name];
+    public static string[] FieldsRequiringReload =>
+    [
+        GraphPath.Name,
+        EmbeddingModel.Name,
+        ModelsDirectory.Name,
+        ExtractionPromptPath.Name,
+        GraphExtractionPromptPath.Name,
+        GraphExtractionTrigger.Name,
+    ];
 
     public static readonly FormTextField GraphPath = new()
     {
@@ -65,8 +74,21 @@ public class ModuleConfigurationProvider(
     {
         Name = "EnableGraphExtraction",
         Label = "Enable Graph Extraction (LLM)",
-        Text = "If true, GraphMemory will invoke the graph extraction prompt to propose entities/relations (stub until LLM is wired).",
+        Text = "If true, GraphMemory will either parse GRAPH_JSON from memory items or run the graph extraction prompt (depending on GraphExtractionTrigger).",
         DefaultValue = false,
+    };
+
+    public static readonly FormEnumField<GraphExtractionTrigger> GraphExtractionTrigger = new()
+    {
+        Name = "GraphExtractionTrigger",
+        Label = "Graph Extraction Trigger",
+        Text = "Run graph extraction every turn (costlier) or only when memories are generated (requires GRAPH_JSON in memory items).",
+        DefaultValue = Memory.GraphExtractionTrigger.OnlyOnMemoryGeneration,
+        Choices =
+        [
+            new FormEnumField<GraphExtractionTrigger>.Choice { Label = "Every turn", Value = Memory.GraphExtractionTrigger.EveryTurn },
+            new FormEnumField<GraphExtractionTrigger>.Choice { Label = "Only on memory generation", Value = Memory.GraphExtractionTrigger.OnlyOnMemoryGeneration },
+        ]
     };
 
     public static readonly FormBooleanField PrefillMemoryWindow = new()
@@ -197,7 +219,8 @@ public class ModuleConfigurationProvider(
             ExtractionPromptPath,
             EnablePlaceholderExtraction,
             GraphExtractionPromptPath,
-            EnableGraphExtraction
+            EnableGraphExtraction,
+            GraphExtractionTrigger.AsField()
         );
     }
 }

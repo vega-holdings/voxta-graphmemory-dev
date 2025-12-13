@@ -45,3 +45,14 @@
 - Graph extraction config fields added: `GraphExtractionPromptPath`, `EnableGraphExtraction` (defaults off). Placeholder remains off by default.
 - The shipped server summarization prompt (`Resources/Prompts/Default/en/Summarization/MemoryExtractionSystemMessage.scriban`) is hard-coded in `Voxta.Shared.LLMUtils.Prompting.PromptTemplates`; there’s no SDK knob to swap prompts. Changing prompts today requires file replacement or a custom extractor.
 - MicrosoftSemanticKernel module does not generate summaries; it only indexes provided `MemoryRef` items. The 1996 lore entries in `graphs/graph-memory.db` came from the old placeholder summarizer, not SK.
+
+## Current Findings (Dec 13, 2025)
+- Implemented `GRAPH_JSON:` parsing in `Memory/GraphExtractor.TryParseGraphFromText(...)`.
+- `GraphMemoryProviderInstance` now calls `ProcessGraphFromMemoryRef(...)` during `RegisterMemoriesAsync`/`UpdateMemoriesAsync` to upsert entities/relations when `EnableGraphExtraction` is enabled.
+- Practical POC path: override the server’s `Resources/Prompts/Default/en/Summarization/MemoryExtractionSystemMessage.scriban` to emit a `GRAPH_JSON:` line; GraphMemory will ingest it from memory items and build the graph.
+
+## Current Findings (Dec 13, 2025 — later)
+- `GraphExtractionTrigger` config added:
+  - `OnlyOnMemoryGeneration` (default): GraphMemory only parses `GRAPH_JSON:` blocks from memory items.
+  - `EveryTurn`: GraphMemory calls the currently-selected `ITextGenService` via `IDynamicServiceAccessor<ITextGenService>` using `GraphExtractionPromptPath` and applies entities/relations in the background.
+- `GRAPH_JSON:`-only memory items are not stored as graph lore (they’re parsed only) to avoid polluting retrieval.

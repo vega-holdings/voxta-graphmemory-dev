@@ -1,18 +1,23 @@
 using Microsoft.Extensions.Logging;
+using Voxta.Abstractions.DependencyInjection;
 using Voxta.Abstractions.Model;
 using Voxta.Abstractions.Services.Memory;
+using Voxta.Abstractions.Services.TextGen;
 
 namespace Voxta.Modules.GraphMemory.Memory;
 
 public class GraphMemoryProviderInstance(
     ILogger logger,
-    GraphMemorySettings settings
+    GraphMemorySettings settings,
+    IDynamicServiceAccessor<ITextGenService> textGenAccessor
 ) : IMemoryProviderInstance
 {
     private readonly ILogger _logger = logger;
     private readonly GraphStore _store = new(settings.GraphPath);
     private readonly TextEmbedder _embedder = new();
-    private readonly GraphExtractor _graphExtractor = new(logger, settings);
+    private readonly GraphExtractor _graphExtractor = new(logger, settings, textGenAccessor);
+    private readonly SemaphoreSlim _graphExtractionGate = new(1, 1);
+    private readonly CancellationTokenSource _disposeCts = new();
     private Guid? _lastProcessedMessageId;
     private int _maxMemoryTokens;
 
@@ -28,6 +33,7 @@ public class GraphMemoryProviderInstance(
         foreach (var entry in items)
         {
             ProcessGraphFromMemoryRef(entry);
+            if (IsGraphJsonOnly(entry.Text)) continue;
             var lore = EmbedLore(ToLoreFromMemoryRef(entry));
             _store.UpsertLore(new[] { lore });
         }
@@ -69,23 +75,7 @@ public class GraphMemoryProviderInstance(
             _store.UpsertLore(new[] { EmbedLore(summaryLore) });
         }
 
-        if (settings.EnableGraphExtraction)
-        {
-            try
-            {
-                var graphResult = _graphExtractor.Extract(newMessages, _store.Entities, _store.Relations);
-                if (graphResult != null)
-                {
-                    if (graphResult.Entities.Count > 0) _store.UpsertEntities(graphResult.Entities);
-                    if (graphResult.Relations.Count > 0) _store.UpsertRelations(graphResult.Relations);
-                    if (graphResult.Lore.Count > 0) _store.UpsertLore(graphResult.Lore.Select(EmbedLore));
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Graph extraction failed; skipping graph updates for this batch.");
-            }
-        }
+        QueueGraphExtractionIfNeeded(newMessages, cancellationToken);
 
         _lastProcessedMessageId = newMessages.LastOrDefault()?.LocalId;
         return Task.FromResult(changed);
@@ -113,6 +103,7 @@ public class GraphMemoryProviderInstance(
             foreach (var entry in update)
             {
                 ProcessGraphFromMemoryRef(entry);
+                if (IsGraphJsonOnly(entry.Text)) continue;
                 _store.UpsertLore(new[] { EmbedLore(ToLoreFromMemoryRef(entry)) });
             }
         }
@@ -121,6 +112,7 @@ public class GraphMemoryProviderInstance(
             foreach (var entry in add)
             {
                 ProcessGraphFromMemoryRef(entry);
+                if (IsGraphJsonOnly(entry.Text)) continue;
                 _store.UpsertLore(new[] { EmbedLore(ToLoreFromMemoryRef(entry)) });
             }
         }
@@ -129,6 +121,9 @@ public class GraphMemoryProviderInstance(
 
     public ValueTask DisposeAsync()
     {
+        _disposeCts.Cancel();
+        _disposeCts.Dispose();
+        _graphExtractionGate.Dispose();
         return ValueTask.CompletedTask;
     }
 
@@ -260,11 +255,61 @@ public class GraphMemoryProviderInstance(
     private void ProcessGraphFromMemoryRef(MemoryRef entry)
     {
         if (!settings.EnableGraphExtraction) return;
-        var parsed = _graphExtractor.TryParseGraphFromText(entry.Text, _store.Entities);
+        var parsed = _graphExtractor.TryParseGraphFromText(entry.Text, _store.Entities, _store.Relations);
         if (parsed == null) return;
+
+        if (parsed.Entities.Count > 0 || parsed.Relations.Count > 0)
+        {
+            _logger.LogDebug("GRAPH_JSON parsed from memory item id={Id}: entities={Entities} relations={Relations}",
+                entry.Id, parsed.Entities.Count, parsed.Relations.Count);
+        }
 
         if (parsed.Entities.Count > 0) _store.UpsertEntities(parsed.Entities);
         if (parsed.Relations.Count > 0) _store.UpsertRelations(parsed.Relations);
+    }
+
+    private void QueueGraphExtractionIfNeeded(IReadOnlyList<ChatMessageData> newMessages, CancellationToken cancellationToken)
+    {
+        if (!settings.EnableGraphExtraction) return;
+        if (settings.GraphExtractionTrigger != GraphExtractionTrigger.EveryTurn) return;
+        if (!_graphExtractionGate.Wait(0)) return;
+
+        _ = Task.Run(async () =>
+        {
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
+
+            try
+            {
+                _logger.LogDebug("Graph extraction queued (every turn): messages={Count}", newMessages.Count);
+                var graphResult = await _graphExtractor.ExtractAsync(newMessages, _store.Entities, _store.Relations, linkedCts.Token);
+                if (graphResult != null)
+                {
+                    if (graphResult.Entities.Count > 0) _store.UpsertEntities(graphResult.Entities);
+                    if (graphResult.Relations.Count > 0) _store.UpsertRelations(graphResult.Relations);
+                    if (graphResult.Lore.Count > 0) _store.UpsertLore(graphResult.Lore.Select(EmbedLore));
+
+                    _logger.LogInformation("Graph extraction applied: entities={Entities} relations={Relations} lore={Lore}",
+                        graphResult.Entities.Count, graphResult.Relations.Count, graphResult.Lore.Count);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // ignore
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Graph extraction failed; skipping graph updates for this batch.");
+            }
+            finally
+            {
+                _graphExtractionGate.Release();
+            }
+        });
+    }
+
+    private static bool IsGraphJsonOnly(string text)
+    {
+        return text.TrimStart().StartsWith("GRAPH_JSON:", StringComparison.OrdinalIgnoreCase);
     }
 
     private static Guid DeterministicGuid(string text)

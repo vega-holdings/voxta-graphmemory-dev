@@ -11,19 +11,35 @@ This repo tracks experimental work on a graph-backed memory provider for Voxta.
   - Retrieval knobs: `PrefillMemoryWindow`, `MaxMemoryWindowEntries`, `ExpireMemoriesAfter`, `MaxQueryResults`, `MinScore`, `MaxHops`, `NeighborLimit`, `DeterministicOnly`.
   - Extraction: `ExtractionPromptPath`, `EnablePlaceholderExtraction` (default false).
   - Graph extraction: `GraphExtractionPromptPath`, `EnableGraphExtraction` (default false).
+  - Graph extraction trigger: `GraphExtractionTrigger` (`OnlyOnMemoryGeneration` default, or `EveryTurn`).
 - Prompts (live under `Resources/Prompts/Default/en/GraphMemory/` in the server):
   - `MemoryExtractionSystemMessage.graph.scriban` — lore/summary-style prompt.
   - `GraphExtraction.graph.scriban` — structured JSON prompt for `{entities, relations}`.
   - Editable copies kept in `GraphMemoryArtifacts/`.
 - Placeholder summarizer is gated; no raw “Summary:” lore unless explicitly enabled.
-- GraphExtractor is stub-only (builds prompt, returns null). No LLM wiring available in the Modules SDK.
+- GraphMemory supports two ways to populate the graph:
+  - `OnlyOnMemoryGeneration` (default): parse `GRAPH_JSON:` blocks from incoming `MemoryRef.Text` (requires the summarization/memory prompt to emit them).
+  - `EveryTurn`: call the currently-selected `ITextGenService` via `IDynamicServiceAccessor<ITextGenService>` and run `GraphExtractionPromptPath` on each batch of new messages (runs in the background; updates affect future turns).
+
+## Current Graph JSON Approach (POC)
+The simplest “no extra LLM calls” approach is:
+1) Make the server’s memory-extraction prompt emit a `GRAPH_JSON:` line (global file override).
+2) Let GraphMemory parse that `GRAPH_JSON:` from the resulting memory items and upsert the graph.
+
+In this workspace, the overridden prompt is:
+- `Voxta.Server.Win.v1.2.0/Resources/Prompts/Default/en/Summarization/MemoryExtractionSystemMessage.scriban`
+
+Notes:
+- This is a hack and applies globally to the server prompt set.
+- Depending on how the server parses memory extraction output, the `GRAPH_JSON:` line may also end up as a stored memory/lore entry.
+ - GraphMemory will *not* store `GRAPH_JSON:`-only memory items as graph lore (it only parses them to upsert entities/relations).
 
 ## Repository
 Private GitHub: https://github.com/vega-holdings/voxta-graphmemory-dev  
 Branch: `master`
 
 ## Open Issues / Needs from Voxta Devs
-1) **LLM/TextGen access in modules**: Expose a supported interface (e.g., `ITextGenService` or `ISummarizationService`) to modules so we can call the configured model with a custom prompt. Today only null stubs are in `Voxta.Abstractions`; real services are server-internal.
+1) **Supported “call current LLM” hook**: In server v1.2.0 we can use `IDynamicServiceAccessor<ITextGenService>`, but this isn’t documented as stable SDK surface. A supported module API to invoke the configured LLM with a custom prompt would remove guesswork.
 2) **Prompt selection**: Provide a way to supply custom prompts per module/service, rather than hard-coded `PromptTemplates` in `Voxta.Shared.LLMUtils`. Even a file-path override would help.
 3) **Graph extraction hook**: If dual extraction is desired (memory lore + graph JSON), support running both in `UpdateMemoryWindowAsync` with separate prompts.
 4) **Stable shared libraries**: Publish `Voxta.Shared.HuggingFaceUtils` (and LLMUtils if intended) as packages, or guarantee module-friendly binding redirects.
