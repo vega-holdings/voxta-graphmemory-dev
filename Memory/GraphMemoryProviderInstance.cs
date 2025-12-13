@@ -25,8 +25,12 @@ public class GraphMemoryProviderInstance(
 
     public Task RegisterMemoriesAsync(IEnumerable<MemoryRef> items, CancellationToken cancellationToken)
     {
-        var lore = items.Select(ToLoreFromMemoryRef).Select(EmbedLore);
-        _store.UpsertLore(lore);
+        foreach (var entry in items)
+        {
+            ProcessGraphFromMemoryRef(entry);
+            var lore = EmbedLore(ToLoreFromMemoryRef(entry));
+            _store.UpsertLore(new[] { lore });
+        }
         return Task.CompletedTask;
     }
 
@@ -104,8 +108,22 @@ public class GraphMemoryProviderInstance(
     public Task UpdateMemoriesAsync(Guid[] remove, MemoryRef[] update, MemoryRef[] add, CancellationToken cancellationToken)
     {
         if (remove.Length > 0) _store.RemoveLore(remove);
-        if (update.Length > 0) _store.UpsertLore(update.Select(ToLoreFromMemoryRef).Select(EmbedLore));
-        if (add.Length > 0) _store.UpsertLore(add.Select(ToLoreFromMemoryRef).Select(EmbedLore));
+        if (update.Length > 0)
+        {
+            foreach (var entry in update)
+            {
+                ProcessGraphFromMemoryRef(entry);
+                _store.UpsertLore(new[] { EmbedLore(ToLoreFromMemoryRef(entry)) });
+            }
+        }
+        if (add.Length > 0)
+        {
+            foreach (var entry in add)
+            {
+                ProcessGraphFromMemoryRef(entry);
+                _store.UpsertLore(new[] { EmbedLore(ToLoreFromMemoryRef(entry)) });
+            }
+        }
         return Task.CompletedTask;
     }
 
@@ -237,6 +255,16 @@ public class GraphMemoryProviderInstance(
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
+    }
+
+    private void ProcessGraphFromMemoryRef(MemoryRef entry)
+    {
+        if (!settings.EnableGraphExtraction) return;
+        var parsed = _graphExtractor.TryParseGraphFromText(entry.Text, _store.Entities);
+        if (parsed == null) return;
+
+        if (parsed.Entities.Count > 0) _store.UpsertEntities(parsed.Entities);
+        if (parsed.Relations.Count > 0) _store.UpsertRelations(parsed.Relations);
     }
 
     private static Guid DeterministicGuid(string text)

@@ -1,9 +1,10 @@
-Your role is to extract and list clear, self-contained, and accurate memories from <text> and <conversation> for long-term memory retention and retrieval.
+Your role is to extract and list clear, self-contained and accurate memories from <text> and <conversation> for long-term memory retention and retrieval, AND to emit a graph JSON block for entities/relations.
 
 Only extract memories from <conversation> and <text>! Information in <context> has already been extracted.
 Respond with <memories> followed by one self-contained memory text per line, with the most important information first.
+At the end, output a single line starting with `GRAPH_JSON:` followed by a JSON object with `entities` and `relations`.
 
-Rules:
+Memory Rules:
 - Be concise and factual. Avoid prose and interpretations.
 - Each memory should include about which specific individuals the memory refers to.
 - Preserve the original choice of words no matter how unethical or vulgar; ensure accuracy.
@@ -12,6 +13,21 @@ Rules:
 - Do not include fleeting feelings and states such as "feeling relaxed". Do not include details that are not relevant to long term memory.
 - Example of useful memories: relationships, preferences, key decisions, significant events, personality traits, world events.
 - Prefer fewer, longer memories (up to 2-3 sentences) as long as they refer to the same event or topic.
+
+Graph Rules:
+- Only named characters (no generic “User/Player/Character”).
+- Only major plot events/relations that change the story.
+- Use exact names from existing entities when possible (if provided in <context>).
+- Be minimal; dedup across all messages; empty arrays if nothing significant.
+- JSON format:
+{
+  "entities": [
+    { "name": "CharacterName", "type": "Character", "summary": "optional state/goal/mood" }
+  ],
+  "relations": [
+    { "source": "Name1", "target": "Name2", "relation": "RELATION_TYPE", "attributes": { "context": "why" } }
+  ]
+}
 
 Examples:
 
@@ -31,9 +47,10 @@ John: I have a dog keychain, but it's just plastic.
 1; Samantha grew up near the sea and frequently spent time there.
 2; Samantha values her cat-shaped silver keychain, a gift from a close friend.
 </memories>
+GRAPH_JSON: {"entities":[{"name":"Samantha","type":"Character","summary":"Grew up near the sea; values a silver cat keychain from a close friend."},{"name":"John","type":"Character","summary":"Owns a plastic dog keychain."}],"relations":[{"source":"Samantha","target":"John","relation":"talked_with","attributes":{"context":"Discussed keychains and upbringing."}}]}
 
 <context>
-Xin: likes fancy clothes, black hair
+Xin: like fancy clothes, black hair
 Phoebe: has a doctorate in submarine ecosystems
 Xin and Phoebe are sitting in a cafe.
 The current date is January 15, 1996.
@@ -50,3 +67,4 @@ Xin: No, it's the material, it's super uncomfortable.
 2; Xin hates the blue skirt she bought on January 14, 1996 because it's itchy and uncomfortable.
 3; Phoebe complimented Xin's blue skirt, it made Phoebe blush.
 </memories>
+GRAPH_JSON: {"entities":[{"name":"Xin","type":"Character","summary":"Dislikes a blue skirt bought on January 14, 1996 because it is itchy and uncomfortable."},{"name":"Phoebe","type":"Character","summary":"Complimented Xin's blue skirt."}],"relations":[{"source":"Phoebe","target":"Xin","relation":"complimented","attributes":{"context":"Said the blue skirt looks nice."}}]}
