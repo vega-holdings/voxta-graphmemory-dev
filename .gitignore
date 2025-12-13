@@ -1,0 +1,59 @@
+# .NET / Visual Studio
+bin/
+obj/
+artifacts/
+Debug/
+Release/
+.vs/
+*.user
+*.rsuser
+*.suo
+*.userprefs
+*.ide
+*.userosscache
+*.sln.docstates
+
+# Build outputs
+**/bin/
+**/obj/
+**/TestResults/
+**/*.cache/
+**/*.dbmdl
+**/*.bak
+**/*.log
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+**/packages/*
+!**/packages/build/
+*.nuget.props
+*.nuget.targets
+
+# Rider / JetBrains
+.idea/
+*.ipr
+*.iws
+*.iml
+
+# Resharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# Coverage
+coverage*/
+*.coverage
+*.coveragexml
+
+# OS junk
+Thumbs.db
+ehthumbs.db
+.DS_Store
+*.swp
+
+# Publish outputs
+*.publishsettings
+**/AppPackages/
+*.publish.xml
