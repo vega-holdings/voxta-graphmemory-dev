@@ -1,6 +1,7 @@
 # GraphMemory Module (Experimental)
 
 This repo tracks experimental work on a graph-backed memory provider for Voxta.
+![Gemini_Generated_Image_te9i0te9i0te9i0t](https://github.com/user-attachments/assets/f01f25d1-b4f9-4261-b3e6-efdefa9f8ebb)
 
 ## Current State
 - Target: `net10.0`, `Voxta.Sdk.Modules 1.1.4`.
