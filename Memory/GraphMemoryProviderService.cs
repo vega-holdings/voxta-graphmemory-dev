@@ -7,7 +7,8 @@ using Voxta.Modules.GraphMemory.Configuration;
 namespace Voxta.Modules.GraphMemory.Memory;
 
 public class GraphMemoryProviderService(
-    ILogger<GraphMemoryProviderService> logger
+    ILogger<GraphMemoryProviderService> logger,
+    IServiceProvider? services = null
 ) : ServiceBase(logger), IMemoryProviderService, IAsyncDisposable
 {
     public Task WarmupAsync(CancellationToken cancellationToken)
@@ -36,7 +37,7 @@ public class GraphMemoryProviderService(
             DeterministicOnly = ModuleConfiguration.GetRequired(ModuleConfigurationProvider.DeterministicOnly),
         };
 
-        IMemoryProviderInstance instance = new GraphMemoryProviderInstance(logger, settings);
+        IMemoryProviderInstance instance = new GraphMemoryProviderInstance(logger, services, settings);
         return Task.FromResult(instance);
     }
 
