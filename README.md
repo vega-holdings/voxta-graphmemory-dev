@@ -16,7 +16,7 @@ This repo tracks experimental work on a graph-backed memory provider for Voxta.
   - `GraphExtraction.graph.scriban` — structured JSON prompt for `{entities, relations}`.
   - Editable copies kept in `GraphMemoryArtifacts/`.
 - Placeholder summarizer is gated; no raw “Summary:” lore unless explicitly enabled.
-- GraphExtractor now tries (best-effort, likely brittle) to resolve `ITextGenService` from DI and call a `GenerateReplyAsync(TextGenGenerateRequest, CancellationToken)` overload via reflection. Most setups won’t expose this; if absent it no-ops. Real LLM wiring still needs a proper module-facing API.
+- GraphExtractor is stub-only (builds prompt, returns null). No LLM wiring available in the Modules SDK.
 
 ## Repository
 Private GitHub: https://github.com/vega-holdings/voxta-graphmemory-dev  

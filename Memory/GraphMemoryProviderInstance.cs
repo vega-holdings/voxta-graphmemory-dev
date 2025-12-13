@@ -6,14 +6,13 @@ namespace Voxta.Modules.GraphMemory.Memory;
 
 public class GraphMemoryProviderInstance(
     ILogger logger,
-    IServiceProvider? services,
     GraphMemorySettings settings
 ) : IMemoryProviderInstance
 {
     private readonly ILogger _logger = logger;
     private readonly GraphStore _store = new(settings.GraphPath);
     private readonly TextEmbedder _embedder = new();
-    private readonly GraphExtractor _graphExtractor = new(logger, services, settings);
+    private readonly GraphExtractor _graphExtractor = new(logger, settings);
     private Guid? _lastProcessedMessageId;
     private int _maxMemoryTokens;
 

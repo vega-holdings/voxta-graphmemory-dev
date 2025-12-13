@@ -13,10 +13,6 @@
       <HintPath>..\Voxta.Server.Win.v1.2.0\Voxta.Shared.HuggingFaceUtils.dll</HintPath>
       <Private>true</Private>
     </Reference>
-    <Reference Include="Voxta.Shared.LLMUtils">
-      <HintPath>..\Voxta.Server.Win.v1.2.0\Voxta.Shared.LLMUtils.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
   </ItemGroup>
 
 </Project>
