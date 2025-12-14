@@ -94,7 +94,8 @@ internal class GraphStore
         int maxHops,
         TextEmbedder? embedder,
         double minScore,
-        bool deterministicOnly)
+        bool deterministicOnly,
+        Guid? chatId = null)
     {
         var termList = terms.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.ToLowerInvariant()).ToList();
         if (termList.Count == 0) return new GraphSearchResult();
@@ -108,9 +109,16 @@ internal class GraphStore
                 queryVec = embedder.Embed(string.Join(' ', termList));
             }
 
+            static bool InScope(Guid? itemChatId, Guid? desiredChatId)
+            {
+                if (!desiredChatId.HasValue) return true;
+                return !itemChatId.HasValue || itemChatId.Value == desiredChatId.Value;
+            }
+
             // Lore match
             foreach (var l in _data.Lore)
             {
+                if (!InScope(l.ChatId, chatId)) continue;
                 var score = ScoreText(l.Text, l.Keywords, termList);
                 if (!deterministicOnly && embedder != null && queryVec != null && l.Embedding != null)
                 {
@@ -126,6 +134,7 @@ internal class GraphStore
             // Entity match
             foreach (var e in _data.Entities)
             {
+                if (!InScope(e.ChatId, chatId)) continue;
                 var score = ScoreText(e.Summary, e.Aliases, termList, e.Name);
                 if (!deterministicOnly && embedder != null && queryVec != null && e.Embedding != null)
                 {
@@ -141,6 +150,7 @@ internal class GraphStore
             // Relation match
             foreach (var r in _data.Relations)
             {
+                if (!InScope(r.ChatId, chatId)) continue;
                 var score = ScoreText(r.Evidence, new[] { r.Type }, termList);
                 if (score > 0 || (minScore > 0 && score >= minScore))
                 {
@@ -151,17 +161,23 @@ internal class GraphStore
             // Neighbor expansion
             if (maxHops > 0)
             {
-                ExpandNeighbors(matches, neighborLimit, maxHops);
+                ExpandNeighbors(matches, neighborLimit, maxHops, chatId);
             }
 
             return matches;
         }
     }
 
-    private void ExpandNeighbors(GraphSearchResult matches, int neighborLimit, int hops)
+    private void ExpandNeighbors(GraphSearchResult matches, int neighborLimit, int hops, Guid? chatId)
     {
         var visitedEntities = new HashSet<Guid>(matches.Entities.Keys);
         var visitedRelations = new HashSet<Guid>(matches.Relations.Keys);
+
+        static bool InScope(Guid? itemChatId, Guid? desiredChatId)
+        {
+            if (!desiredChatId.HasValue) return true;
+            return !itemChatId.HasValue || itemChatId.Value == desiredChatId.Value;
+        }
 
         for (int depth = 0; depth < hops; depth++)
         {
@@ -171,6 +187,7 @@ internal class GraphStore
             foreach (var rel in _data.Relations)
             {
                 if (visitedRelations.Contains(rel.Id)) continue;
+                if (!InScope(rel.ChatId, chatId)) continue;
 
                 if (visitedEntities.Contains(rel.SourceId) || visitedEntities.Contains(rel.TargetId))
                 {
@@ -182,7 +199,7 @@ internal class GraphStore
                     if (!visitedEntities.Contains(src) && matches.Entities.Count < neighborLimit)
                     {
                         var ent = _data.Entities.FirstOrDefault(x => x.Id == src);
-                        if (ent != null)
+                        if (ent != null && InScope(ent.ChatId, chatId))
                         {
                             matches.Entities[src] = (ent, 0.05);
                             newEntities.Add(src);
@@ -191,7 +208,7 @@ internal class GraphStore
                     if (!visitedEntities.Contains(tgt) && matches.Entities.Count < neighborLimit)
                     {
                         var ent = _data.Entities.FirstOrDefault(x => x.Id == tgt);
-                        if (ent != null)
+                        if (ent != null && InScope(ent.ChatId, chatId))
                         {
                             matches.Entities[tgt] = (ent, 0.05);
                             newEntities.Add(tgt);

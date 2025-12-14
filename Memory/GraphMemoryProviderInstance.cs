@@ -62,7 +62,8 @@ public class GraphMemoryProviderInstance(
             settings.MaxHops,
             settings.DeterministicOnly ? null : _embedder,
             settings.MinScore,
-            settings.DeterministicOnly);
+            settings.DeterministicOnly,
+            chatId: newMessages[0].ChatId);
         var expireIndex = GetExpiry(messages);
 
         var candidates = RankMatches(graphMatches);
@@ -89,7 +90,8 @@ public class GraphMemoryProviderInstance(
             settings.MaxHops,
             settings.DeterministicOnly ? null : _embedder,
             settings.MinScore,
-            settings.DeterministicOnly);
+            settings.DeterministicOnly,
+            chatId: null);
         var ranked = RankMatches(matches);
         var results = ranked.Select((m, i) => new MemorySearchResult { Memory = m, Score = 1.0 - i * 0.01 }).ToArray();
         return Task.FromResult(results);
@@ -237,6 +239,7 @@ public class GraphMemoryProviderInstance(
         if (!settings.EnablePlaceholderExtraction)
             return null;
 
+        var first = messages.FirstOrDefault();
         var text = string.Join(" ", messages.Select(m => m.Value).Where(s => !string.IsNullOrWhiteSpace(s)));
         if (string.IsNullOrWhiteSpace(text)) return null;
         var id = DeterministicGuid(text);
@@ -245,6 +248,8 @@ public class GraphMemoryProviderInstance(
             Id = id,
             Text = $"Summary: {text}",
             Keywords = new(),
+            ChatId = first?.ChatId,
+            UserId = first?.UserId,
             Weight = 0,
             Tokens = GraphMapping.EstimateTokens(text),
             CreatedAt = DateTimeOffset.UtcNow,

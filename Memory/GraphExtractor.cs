@@ -68,7 +68,13 @@ internal class GraphExtractor
             var response = await service.GenerateAsync(request, observer, cancellationToken);
             observer.Done();
 
-            var result = TryParseGraphResponse(response, existingEntities, existingRelations);
+            var fallbackScope = new GraphScope
+            {
+                ChatId = messages[0].ChatId,
+                UserId = messages[0].UserId,
+            };
+
+            var result = TryParseGraphResponse(response, existingEntities, existingRelations, fallbackScope);
             if (result == null)
             {
                 _logger.LogDebug("Graph extraction returned no usable entities/relations (len={Length})", response?.Length ?? 0);
@@ -119,7 +125,7 @@ internal class GraphExtractor
         try
         {
             using var doc = JsonDocument.Parse(payload);
-            return ParseGraphJson(doc, existingEntities, existingRelations);
+            return ParseGraphJson(doc, existingEntities, existingRelations, fallbackScope: null);
         }
         catch (Exception ex)
         {
@@ -131,7 +137,8 @@ internal class GraphExtractor
     private GraphExtractionResult? TryParseGraphResponse(
         string? response,
         IReadOnlyCollection<GraphEntity> existingEntities,
-        IReadOnlyCollection<GraphRelation> existingRelations)
+        IReadOnlyCollection<GraphRelation> existingRelations,
+        GraphScope? fallbackScope)
     {
         if (string.IsNullOrWhiteSpace(response)) return null;
 
@@ -142,7 +149,7 @@ internal class GraphExtractor
         try
         {
             using var doc = JsonDocument.Parse(json);
-            return ParseGraphJson(doc, existingEntities, existingRelations);
+            return ParseGraphJson(doc, existingEntities, existingRelations, fallbackScope);
         }
         catch (JsonException ex)
         {
@@ -154,9 +161,36 @@ internal class GraphExtractor
     private GraphExtractionResult? ParseGraphJson(
         JsonDocument doc,
         IReadOnlyCollection<GraphEntity> existingEntities,
-        IReadOnlyCollection<GraphRelation> existingRelations)
+        IReadOnlyCollection<GraphRelation> existingRelations,
+        GraphScope? fallbackScope)
     {
         var result = new GraphExtractionResult();
+        var scope = ParseScope(doc.RootElement, fallbackScope);
+
+        GraphEntity GetOrCreateEntityByName(string name, string? type = null, string? summary = null, List<string>? aliases = null)
+        {
+            var existing = scope.ChatId.HasValue
+                ? existingEntities.FirstOrDefault(x =>
+                    x.ChatId == scope.ChatId &&
+                    x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                : existingEntities.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+            var id = existing?.Id ?? Guid.NewGuid();
+            return new GraphEntity
+            {
+                Id = id,
+                Name = name,
+                Type = string.IsNullOrWhiteSpace(type) ? (existing?.Type ?? "entity") : type!,
+                Summary = string.IsNullOrWhiteSpace(summary) ? (existing?.Summary ?? string.Empty) : summary!,
+                Aliases = aliases ?? existing?.Aliases?.ToList() ?? new List<string>(),
+                ChatId = scope.ChatId ?? existing?.ChatId,
+                SessionId = scope.SessionId ?? existing?.SessionId,
+                UserId = scope.UserId ?? existing?.UserId,
+                UserName = scope.UserName ?? existing?.UserName,
+                CharacterIds = scope.CharacterIds.Count > 0 ? scope.CharacterIds.ToList() : existing?.CharacterIds?.ToList() ?? new List<Guid>(),
+                CharacterNames = scope.CharacterNames.Count > 0 ? scope.CharacterNames.ToList() : existing?.CharacterNames?.ToList() ?? new List<string>(),
+            };
+        }
 
         if (doc.RootElement.TryGetProperty("entities", out var ents) && ents.ValueKind == JsonValueKind.Array)
         {
@@ -181,17 +215,8 @@ internal class GraphExtractor
                     }
                 }
 
-                // Dedup by name against existing entities
-                var existing = existingEntities.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-                var id = existing?.Id ?? Guid.NewGuid();
-                result.Entities.Add(new GraphEntity
-                {
-                    Id = id,
-                    Name = name,
-                    Type = type,
-                    Summary = summary,
-                    Aliases = aliases,
-                });
+                var entity = GetOrCreateEntityByName(name, type, summary, aliases);
+                result.Entities.Add(entity);
             }
         }
 
@@ -207,12 +232,10 @@ internal class GraphExtractor
                     continue;
 
                 var srcEnt = result.Entities.FirstOrDefault(x => x.Name.Equals(source, StringComparison.OrdinalIgnoreCase)) ??
-                             existingEntities.FirstOrDefault(x => x.Name.Equals(source, StringComparison.OrdinalIgnoreCase)) ??
-                             new GraphEntity { Name = source };
+                             GetOrCreateEntityByName(source);
 
                 var tgtEnt = result.Entities.FirstOrDefault(x => x.Name.Equals(target, StringComparison.OrdinalIgnoreCase)) ??
-                             existingEntities.FirstOrDefault(x => x.Name.Equals(target, StringComparison.OrdinalIgnoreCase)) ??
-                             new GraphEntity { Name = target };
+                             GetOrCreateEntityByName(target);
 
                 if (!result.Entities.Contains(srcEnt)) result.Entities.Add(srcEnt);
                 if (!result.Entities.Contains(tgtEnt)) result.Entities.Add(tgtEnt);
@@ -232,11 +255,77 @@ internal class GraphExtractor
                     TargetId = tgtEnt.Id,
                     Type = relType,
                     Evidence = r.TryGetProperty("attributes", out var attrs) ? attrs.ToString() : string.Empty,
+                    ChatId = scope.ChatId ?? existing?.ChatId,
+                    SessionId = scope.SessionId ?? existing?.SessionId,
+                    UserId = scope.UserId ?? existing?.UserId,
+                    UserName = scope.UserName ?? existing?.UserName,
+                    CharacterIds = scope.CharacterIds.Count > 0 ? scope.CharacterIds.ToList() : existing?.CharacterIds?.ToList() ?? new List<Guid>(),
+                    CharacterNames = scope.CharacterNames.Count > 0 ? scope.CharacterNames.ToList() : existing?.CharacterNames?.ToList() ?? new List<string>(),
                 });
             }
         }
 
         return result.Entities.Count == 0 && result.Relations.Count == 0 ? null : result;
+    }
+
+    private static GraphScope ParseScope(JsonElement root, GraphScope? fallback)
+    {
+        var scope = fallback ?? new GraphScope();
+
+        if (!root.TryGetProperty("meta", out var meta) || meta.ValueKind != JsonValueKind.Object)
+        {
+            return scope;
+        }
+
+        if (meta.TryGetProperty("chatId", out var chatIdEl) && chatIdEl.ValueKind == JsonValueKind.String &&
+            Guid.TryParse(chatIdEl.GetString(), out var chatId))
+        {
+            scope.ChatId = chatId;
+        }
+
+        if (meta.TryGetProperty("sessionId", out var sessionIdEl) && sessionIdEl.ValueKind == JsonValueKind.String &&
+            Guid.TryParse(sessionIdEl.GetString(), out var sessionId))
+        {
+            scope.SessionId = sessionId;
+        }
+
+        if (meta.TryGetProperty("user", out var user) && user.ValueKind == JsonValueKind.Object)
+        {
+            if (user.TryGetProperty("id", out var userIdEl) && userIdEl.ValueKind == JsonValueKind.String &&
+                Guid.TryParse(userIdEl.GetString(), out var userId))
+            {
+                scope.UserId = userId;
+            }
+            if (user.TryGetProperty("name", out var userNameEl) && userNameEl.ValueKind == JsonValueKind.String)
+            {
+                scope.UserName = userNameEl.GetString();
+            }
+        }
+
+        if (meta.TryGetProperty("characters", out var chars) && chars.ValueKind == JsonValueKind.Array)
+        {
+            var ids = new List<Guid>();
+            var names = new List<string>();
+            foreach (var c in chars.EnumerateArray())
+            {
+                if (c.ValueKind != JsonValueKind.Object) continue;
+                if (c.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String &&
+                    Guid.TryParse(idEl.GetString(), out var id))
+                {
+                    ids.Add(id);
+                }
+                if (c.TryGetProperty("name", out var nameEl) && nameEl.ValueKind == JsonValueKind.String)
+                {
+                    var name = nameEl.GetString();
+                    if (!string.IsNullOrWhiteSpace(name)) names.Add(name!);
+                }
+            }
+
+            if (ids.Count > 0) scope.CharacterIds = ids;
+            if (names.Count > 0) scope.CharacterNames = names;
+        }
+
+        return scope;
     }
 
     private string LoadPrompt()
@@ -296,4 +385,14 @@ internal class GraphExtractionResult
     public List<GraphEntity> Entities { get; } = new();
     public List<GraphRelation> Relations { get; } = new();
     public List<GraphLore> Lore { get; } = new();
+}
+
+internal class GraphScope
+{
+    public Guid? ChatId { get; set; }
+    public Guid? SessionId { get; set; }
+    public Guid? UserId { get; set; }
+    public string? UserName { get; set; }
+    public List<Guid> CharacterIds { get; set; } = new();
+    public List<string> CharacterNames { get; set; } = new();
 }

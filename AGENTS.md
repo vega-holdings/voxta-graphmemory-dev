@@ -59,3 +59,4 @@
 
 ## Current Findings (Dec 14, 2025)
 - `Voxta.Modules.YoloLLM` can run a separate graph extraction LLM call during summarization and emit a `GRAPH_JSON:` memory item; with GraphMemory enabled, this provides a clean “separate call” graph pipeline without replacing server prompts.
+- Group chat behavior: Voxta can extract/integrate the same memory candidates into multiple character memory books; to avoid cross-chat/character ambiguity, GraphMemory expects `GRAPH_JSON` to carry `meta` (chat + participant ids/names) so graph writes can be scoped.

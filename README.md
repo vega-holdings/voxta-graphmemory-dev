@@ -28,6 +28,10 @@ If you’re using `Voxta.Modules.YoloLLM`, the intended pairing is `GraphMemory`
 
 This keeps **graph extraction separate from summary/memory extraction prompts**, while still using the memory pipeline to “deliver” the graph JSON to GraphMemory.
 
+Notes:
+- YOLOLLM injects `meta.chatId/sessionId/user/characters` into `GRAPH_JSON:` so GraphMemory can scope graph writes for group chats.
+- GraphMemory search prefers in-scope items (`chatId` match) but still allows global items (`chatId` missing).
+
 ## Legacy Graph JSON Approach (POC)
 The simplest “no extra LLM calls” approach was:
 1) Make the server’s memory-extraction prompt emit a `GRAPH_JSON:` line (global file override).

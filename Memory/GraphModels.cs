@@ -10,6 +10,12 @@ internal record GraphEntity
     [JsonPropertyName("name")] public string Name { get; init; } = string.Empty;
     [JsonPropertyName("aliases")] public List<string> Aliases { get; init; } = new();
     [JsonPropertyName("summary")] public string Summary { get; init; } = string.Empty;
+    [JsonPropertyName("chatId")] public Guid? ChatId { get; init; }
+    [JsonPropertyName("sessionId")] public Guid? SessionId { get; init; }
+    [JsonPropertyName("userId")] public Guid? UserId { get; init; }
+    [JsonPropertyName("userName")] public string? UserName { get; init; }
+    [JsonPropertyName("characterIds")] public List<Guid> CharacterIds { get; init; } = new();
+    [JsonPropertyName("characterNames")] public List<string> CharacterNames { get; init; } = new();
     [JsonPropertyName("weight")] public int Weight { get; init; } = 0;
     [JsonPropertyName("tokens")] public int Tokens { get; init; } = 0;
     [JsonPropertyName("embedding")] public double[]? Embedding { get; init; }
@@ -24,6 +30,12 @@ internal record GraphRelation
     [JsonPropertyName("sourceId")] public Guid SourceId { get; init; }
     [JsonPropertyName("targetId")] public Guid TargetId { get; init; }
     [JsonPropertyName("evidence")] public string Evidence { get; init; } = string.Empty;
+    [JsonPropertyName("chatId")] public Guid? ChatId { get; init; }
+    [JsonPropertyName("sessionId")] public Guid? SessionId { get; init; }
+    [JsonPropertyName("userId")] public Guid? UserId { get; init; }
+    [JsonPropertyName("userName")] public string? UserName { get; init; }
+    [JsonPropertyName("characterIds")] public List<Guid> CharacterIds { get; init; } = new();
+    [JsonPropertyName("characterNames")] public List<string> CharacterNames { get; init; } = new();
     [JsonPropertyName("weight")] public int Weight { get; init; } = 0;
     [JsonPropertyName("createdAt")] public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     [JsonPropertyName("updatedAt")] public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
@@ -34,6 +46,12 @@ internal record GraphLore
     [JsonPropertyName("id")] public Guid Id { get; init; } = Guid.NewGuid();
     [JsonPropertyName("text")] public string Text { get; init; } = string.Empty;
     [JsonPropertyName("keywords")] public List<string> Keywords { get; init; } = new();
+    [JsonPropertyName("chatId")] public Guid? ChatId { get; init; }
+    [JsonPropertyName("sessionId")] public Guid? SessionId { get; init; }
+    [JsonPropertyName("userId")] public Guid? UserId { get; init; }
+    [JsonPropertyName("userName")] public string? UserName { get; init; }
+    [JsonPropertyName("characterIds")] public List<Guid> CharacterIds { get; init; } = new();
+    [JsonPropertyName("characterNames")] public List<string> CharacterNames { get; init; } = new();
     [JsonPropertyName("weight")] public int Weight { get; init; } = 0;
     [JsonPropertyName("tokens")] public int Tokens { get; init; } = 0;
     [JsonPropertyName("embedding")] public double[]? Embedding { get; init; }
