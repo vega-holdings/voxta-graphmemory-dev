@@ -75,14 +75,14 @@ public class ModuleConfigurationProvider(
         Name = "EnableGraphExtraction",
         Label = "Enable Graph Extraction (LLM)",
         Text = "If true, GraphMemory will either parse GRAPH_JSON from memory items or run the graph extraction prompt (depending on GraphExtractionTrigger).",
-        DefaultValue = false,
+        DefaultValue = true,
     };
 
     public static readonly FormEnumField<GraphExtractionTrigger> GraphExtractionTrigger = new()
     {
         Name = "GraphExtractionTrigger",
         Label = "Graph Extraction Trigger",
-        Text = "Run graph extraction every turn (costlier) or only when memories are generated (requires GRAPH_JSON in memory items).",
+        Text = "Run graph extraction every turn (costlier) or only when memories are generated (requires GRAPH_JSON in memory items, e.g. from YOLOLLM graph extraction).",
         DefaultValue = Memory.GraphExtractionTrigger.OnlyOnMemoryGeneration,
         Choices =
         [

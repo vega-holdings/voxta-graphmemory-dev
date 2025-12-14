@@ -10,7 +10,7 @@ This repo tracks experimental work on a graph-backed memory provider for Voxta.
   - `EmbeddingModel`, `ModelsDirectory`.
   - Retrieval knobs: `PrefillMemoryWindow`, `MaxMemoryWindowEntries`, `ExpireMemoriesAfter`, `MaxQueryResults`, `MinScore`, `MaxHops`, `NeighborLimit`, `DeterministicOnly`.
   - Extraction: `ExtractionPromptPath`, `EnablePlaceholderExtraction` (default false).
-  - Graph extraction: `GraphExtractionPromptPath`, `EnableGraphExtraction` (default false).
+  - Graph extraction: `GraphExtractionPromptPath`, `EnableGraphExtraction` (default true).
   - Graph extraction trigger: `GraphExtractionTrigger` (`OnlyOnMemoryGeneration` default, or `EveryTurn`).
 - Prompts (live under `Resources/Prompts/Default/en/GraphMemory/` in the server):
   - `MemoryExtractionSystemMessage.graph.scriban` — lore/summary-style prompt.
@@ -21,8 +21,15 @@ This repo tracks experimental work on a graph-backed memory provider for Voxta.
   - `OnlyOnMemoryGeneration` (default): parse `GRAPH_JSON:` blocks from incoming `MemoryRef.Text` (requires the summarization/memory prompt to emit them).
   - `EveryTurn`: call the currently-selected `ITextGenService` via `IDynamicServiceAccessor<ITextGenService>` and run `GraphExtractionPromptPath` on each batch of new messages (runs in the background; updates affect future turns).
 
-## Current Graph JSON Approach (POC)
-The simplest “no extra LLM calls” approach is:
+## Recommended Integration (YOLOLLM + GraphMemory)
+If you’re using `Voxta.Modules.YoloLLM`, the intended pairing is `GraphMemory`:
+1) Enable `YoloLLM` for Summarization (it runs a **separate** graph extraction LLM call during summarization and queues a `GRAPH_JSON:` memory item).
+2) Enable `GraphMemory` as the memory provider with `EnableGraphExtraction=true` and `GraphExtractionTrigger=OnlyOnMemoryGeneration` so it ingests `GRAPH_JSON:` memory items and updates the graph DB.
+
+This keeps **graph extraction separate from summary/memory extraction prompts**, while still using the memory pipeline to “deliver” the graph JSON to GraphMemory.
+
+## Legacy Graph JSON Approach (POC)
+The simplest “no extra LLM calls” approach was:
 1) Make the server’s memory-extraction prompt emit a `GRAPH_JSON:` line (global file override).
 2) Let GraphMemory parse that `GRAPH_JSON:` from the resulting memory items and upsert the graph.
 
@@ -46,15 +53,11 @@ Branch: `master`
 5) **Testing/inspection**: API/CLI to inspect graph entities/relations/lore for debugging and scripting.
 
 ## Next Steps (module side)
-- Once an LLM interface is available, wire `GraphExtractor` to:
-  - Load `GraphExtractionPromptPath`, inject messages + existing entity names.
-  - Call LLM, parse JSON `{entities, relations}`.
-  - Dedup and upsert into the graph; optional evidence lore.
 - Keep placeholder extraction off by default; rely on LLM outputs.
 - Consider embedding real vectors (replace `TextEmbedder`) and scoring blend.
 
 ## Caution
-- Current graph extraction is a stub; enabling `EnableGraphExtraction` won’t do anything until LLM wiring exists.
+- `GraphExtractionTrigger=EveryTurn` runs an extra LLM call per turn (cost/latency) and is executed in the background; failures are logged and skipped.
 - Referencing server-private DLLs (LLMUtils) is brittle; waiting on an official module-facing hook.
 
 

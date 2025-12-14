@@ -41,18 +41,21 @@
 ## Current Findings (Dec 12, 2025)
 - HuggingFace downloader is available via `Voxta.Shared.HuggingFaceUtils.dll` in the server root; GraphMemory now references it and exposes `EmbeddingModel` + `ModelsDirectory` like the SK module.
 - Added config fields for `ExtractionPromptPath` and `EnablePlaceholderExtraction` (defaults to GraphMemory prompt path and false). Placeholder summaries are suppressed unless explicitly enabled.
-- Custom prompts dropped at `Resources/Prompts/Default/en/GraphMemory/MemoryExtractionSystemMessage.graph.scriban` (lore) and `GraphExtraction.graph.scriban` (structured entities/relations); no runtime LLM wiring yet—GraphExtractor stub builds the prompt but returns null.
-- Graph extraction config fields added: `GraphExtractionPromptPath`, `EnableGraphExtraction` (defaults off). Placeholder remains off by default.
+- Custom prompts dropped at `Resources/Prompts/Default/en/GraphMemory/MemoryExtractionSystemMessage.graph.scriban` (lore) and `GraphExtraction.graph.scriban` (structured entities/relations); GraphExtractor can call the currently-selected `ITextGenService` to build entities/relations from chat text.
+- Graph extraction config fields added: `GraphExtractionPromptPath`, `EnableGraphExtraction` (default on). Placeholder remains off by default.
 - The shipped server summarization prompt (`Resources/Prompts/Default/en/Summarization/MemoryExtractionSystemMessage.scriban`) is hard-coded in `Voxta.Shared.LLMUtils.Prompting.PromptTemplates`; there’s no SDK knob to swap prompts. Changing prompts today requires file replacement or a custom extractor.
 - MicrosoftSemanticKernel module does not generate summaries; it only indexes provided `MemoryRef` items. The 1996 lore entries in `graphs/graph-memory.db` came from the old placeholder summarizer, not SK.
 
 ## Current Findings (Dec 13, 2025)
 - Implemented `GRAPH_JSON:` parsing in `Memory/GraphExtractor.TryParseGraphFromText(...)`.
 - `GraphMemoryProviderInstance` now calls `ProcessGraphFromMemoryRef(...)` during `RegisterMemoriesAsync`/`UpdateMemoriesAsync` to upsert entities/relations when `EnableGraphExtraction` is enabled.
-- Practical POC path: override the server’s `Resources/Prompts/Default/en/Summarization/MemoryExtractionSystemMessage.scriban` to emit a `GRAPH_JSON:` line; GraphMemory will ingest it from memory items and build the graph.
+- Practical POC path (legacy): override the server’s `Resources/Prompts/Default/en/Summarization/MemoryExtractionSystemMessage.scriban` to emit a `GRAPH_JSON:` line; GraphMemory will ingest it from memory items and build the graph.
 
 ## Current Findings (Dec 13, 2025 — later)
 - `GraphExtractionTrigger` config added:
   - `OnlyOnMemoryGeneration` (default): GraphMemory only parses `GRAPH_JSON:` blocks from memory items.
   - `EveryTurn`: GraphMemory calls the currently-selected `ITextGenService` via `IDynamicServiceAccessor<ITextGenService>` using `GraphExtractionPromptPath` and applies entities/relations in the background.
 - `GRAPH_JSON:`-only memory items are not stored as graph lore (they’re parsed only) to avoid polluting retrieval.
+
+## Current Findings (Dec 14, 2025)
+- `Voxta.Modules.YoloLLM` can run a separate graph extraction LLM call during summarization and emit a `GRAPH_JSON:` memory item; with GraphMemory enabled, this provides a clean “separate call” graph pipeline without replacing server prompts.
