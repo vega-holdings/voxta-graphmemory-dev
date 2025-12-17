@@ -5,6 +5,9 @@ namespace Voxta.Modules.GraphMemory.Memory;
 
 internal class GraphStore
 {
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, GraphStore> SharedStores =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private readonly string _path;
     private readonly object _sync = new();
     private GraphData _data = new();
@@ -20,6 +23,12 @@ internal class GraphStore
     {
         _path = path;
         Load();
+    }
+
+    public static GraphStore GetShared(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        return SharedStores.GetOrAdd(fullPath, p => new GraphStore(p));
     }
 
     public IReadOnlyCollection<GraphEntity> Entities

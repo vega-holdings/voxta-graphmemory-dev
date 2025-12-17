@@ -49,14 +49,14 @@
 ## Current Findings (Dec 13, 2025)
 - Implemented `GRAPH_JSON:` parsing in `Memory/GraphExtractor.TryParseGraphFromText(...)`.
 - `GraphMemoryProviderInstance` now calls `ProcessGraphFromMemoryRef(...)` during `RegisterMemoriesAsync`/`UpdateMemoriesAsync` to upsert entities/relations when `EnableGraphExtraction` is enabled.
-- Practical POC path (legacy): override the server’s `Resources/Prompts/Default/en/Summarization/MemoryExtractionSystemMessage.scriban` to emit a `GRAPH_JSON:` line; GraphMemory will ingest it from memory items and build the graph.
+- Practical POC path (legacy): override the server’s `Resources/Prompts/Default/en/Summarization/MemoryExtractionSystemMessage.scriban` to emit a `GRAPH_JSON:` line. GraphMemory can ingest it from memory items, but this pollutes character memory books; prefer the inbox pipeline instead.
 
 ## Current Findings (Dec 13, 2025 — later)
 - `GraphExtractionTrigger` config added:
-  - `OnlyOnMemoryGeneration` (default): GraphMemory only parses `GRAPH_JSON:` blocks from memory items.
+  - `OnlyOnMemoryGeneration` (default): GraphMemory does not run a per-turn LLM call; it ingests externally-produced `GRAPH_JSON:` updates (preferably from the GraphMemory inbox at `Data/GraphMemory/Inbox`).
   - `EveryTurn`: GraphMemory calls the currently-selected `ITextGenService` via `IDynamicServiceAccessor<ITextGenService>` using `GraphExtractionPromptPath` and applies entities/relations in the background.
 - `GRAPH_JSON:`-only memory items are not stored as graph lore (they’re parsed only) to avoid polluting retrieval.
 
 ## Current Findings (Dec 14, 2025)
-- `Voxta.Modules.YoloLLM` can run a separate graph extraction LLM call during summarization and emit a `GRAPH_JSON:` memory item; with GraphMemory enabled, this provides a clean “separate call” graph pipeline without replacing server prompts.
+- `Voxta.Modules.YoloLLM` can run a separate graph extraction LLM call during summarization and write `GRAPH_JSON:` updates to `Data/GraphMemory/Inbox`; with GraphMemory enabled, this provides a clean “separate call” graph pipeline without replacing server prompts or polluting memory books.
 - Group chat behavior: Voxta can extract/integrate the same memory candidates into multiple character memory books; to avoid cross-chat/character ambiguity, GraphMemory expects `GRAPH_JSON` to carry `meta` (chat + participant ids/names) so graph writes can be scoped.

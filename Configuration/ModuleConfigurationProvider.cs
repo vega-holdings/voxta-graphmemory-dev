@@ -66,7 +66,7 @@ public class ModuleConfigurationProvider(
     {
         Name = "GraphExtractionPromptPath",
         Label = "Graph Extraction Prompt Path",
-        Text = "Path to the Scriban template used for graph JSON extraction (entities/relations).",
+        Text = "Path to the prompt template used for graph JSON extraction (entities/relations). Only used when GraphExtractionTrigger is set to Every turn.",
         DefaultValue = "Resources/Prompts/Default/en/GraphMemory/GraphExtraction.graph.scriban",
     };
 
@@ -82,7 +82,7 @@ public class ModuleConfigurationProvider(
     {
         Name = "GraphExtractionTrigger",
         Label = "Graph Extraction Trigger",
-        Text = "Run graph extraction every turn (costlier) or only when memories are generated (requires GRAPH_JSON in memory items, e.g. from YOLOLLM graph extraction).",
+        Text = "Run graph extraction every turn (costlier) or only when graph updates are produced during summarization (e.g. YOLOLLM writes GRAPH_JSON updates to `Data/GraphMemory/Inbox`).",
         DefaultValue = Memory.GraphExtractionTrigger.OnlyOnMemoryGeneration,
         Choices =
         [
@@ -202,7 +202,10 @@ public class ModuleConfigurationProvider(
             },
             logger);
 
-        return FormBuilder.Build(
+        var trigger = settings.GetRequired(GraphExtractionTrigger);
+
+        var fields = new List<FormField>(32);
+        fields.AddRange(FormBuilder.Build(
             FormTitleField.Create("Graph Memory", null, false),
             GraphPath,
             populatedEmbedding,
@@ -218,9 +221,16 @@ public class ModuleConfigurationProvider(
             FormTitleField.Create("Extraction", null, false),
             ExtractionPromptPath,
             EnablePlaceholderExtraction,
-            GraphExtractionPromptPath,
             EnableGraphExtraction,
             GraphExtractionTrigger.AsField()
-        );
+        ));
+
+        if (trigger == Memory.GraphExtractionTrigger.EveryTurn)
+        {
+            // Only relevant when GraphMemory itself runs the LLM call.
+            fields.Add(GraphExtractionPromptPath);
+        }
+
+        return fields.ToArray();
     }
 }

@@ -18,19 +18,24 @@ This repo tracks experimental work on a graph-backed memory provider for Voxta.
   - Editable copies kept in `GraphMemoryArtifacts/`.
 - Placeholder summarizer is gated; no raw “Summary:” lore unless explicitly enabled.
 - GraphMemory supports two ways to populate the graph:
-  - `OnlyOnMemoryGeneration` (default): parse `GRAPH_JSON:` blocks from incoming `MemoryRef.Text` (requires the summarization/memory prompt to emit them).
-  - `EveryTurn`: call the currently-selected `ITextGenService` via `IDynamicServiceAccessor<ITextGenService>` and run `GraphExtractionPromptPath` on each batch of new messages (runs in the background; updates affect future turns).
+  - `OnlyOnMemoryGeneration` (default): ingest `GRAPH_JSON:` updates produced during summarization (recommended: YOLOLLM writes them to `Data/GraphMemory/Inbox`).
+  - `EveryTurn`: call the currently-selected `ITextGenService` via `IDynamicServiceAccessor<ITextGenService>` and run `GraphExtractionPromptPath` on each batch of new messages (runs in the background; updates affect future turns). Note: this requires a chat-scoped host DI context; if `IChatSessionServices` isn’t initialized, GraphMemory will skip the call and log once.
 
 ## Recommended Integration (YOLOLLM + GraphMemory)
 If you’re using `Voxta.Modules.YoloLLM`, the intended pairing is `GraphMemory`:
-1) Enable `YoloLLM` for Summarization (it runs a **separate** graph extraction LLM call during summarization and queues a `GRAPH_JSON:` memory item).
-2) Enable `GraphMemory` as the memory provider with `EnableGraphExtraction=true` and `GraphExtractionTrigger=OnlyOnMemoryGeneration` so it ingests `GRAPH_JSON:` memory items and updates the graph DB.
+1) Enable `YoloLLM` for Summarization (it runs a **separate** graph extraction LLM call during summarization and writes a `GRAPH_JSON:` update to the GraphMemory inbox at `Data/GraphMemory/Inbox`).
+2) Enable `GraphMemory` as the memory provider with `EnableGraphExtraction=true` and `GraphExtractionTrigger=OnlyOnMemoryGeneration` so it ingests graph updates and updates the graph DB.
 
-This keeps **graph extraction separate from summary/memory extraction prompts**, while still using the memory pipeline to “deliver” the graph JSON to GraphMemory.
+This keeps **graph extraction separate from summary/memory extraction prompts**, avoids polluting character long-term memory books, and works reliably for group chats (meta participants are injected by YOLOLLM).
 
 Notes:
 - YOLOLLM injects `meta.chatId/sessionId/user/characters` into `GRAPH_JSON:` so GraphMemory can scope graph writes for group chats.
 - GraphMemory search prefers in-scope items (`chatId` match) but still allows global items (`chatId` missing).
+
+## Debugging / Viewer
+- Admin viewer: `/manage/graph-memory` (lists chats and renders a simple 2D graph).
+- API: `/api/extensions/graph-memory` (also exposes “Raw JSON” for a chat/character filter).
+- Chat contexts: GraphMemory publishes a compact relationship summary under `GraphMemory/ActiveGraph` and refreshes periodically.
 
 ## Legacy Graph JSON Approach (POC)
 The simplest “no extra LLM calls” approach was:
@@ -62,6 +67,7 @@ Branch: `master`
 
 ## Caution
 - `GraphExtractionTrigger=EveryTurn` runs an extra LLM call per turn (cost/latency) and is executed in the background; failures are logged and skipped.
+- If you see `NullReferenceException: Service IChatSessionServices was not initialized`, switch to `GraphExtractionTrigger=OnlyOnMemoryGeneration` and feed `GRAPH_JSON:` via YOLOLLM (recommended) or another summarizer.
 - Referencing server-private DLLs (LLMUtils) is brittle; waiting on an official module-facing hook.
 
 

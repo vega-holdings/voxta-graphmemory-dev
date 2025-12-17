@@ -42,6 +42,8 @@ public class GraphMemoryProviderService(
             DeterministicOnly = ModuleConfiguration.GetRequired(ModuleConfigurationProvider.DeterministicOnly),
         };
 
+        GraphMemoryRuntime.Initialize(settings.GraphPath);
+
         IMemoryProviderInstance instance = new GraphMemoryProviderInstance(logger, settings, _textGenAccessor);
         return Task.FromResult(instance);
     }

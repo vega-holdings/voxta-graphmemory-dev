@@ -13,11 +13,13 @@ public class GraphMemoryProviderInstance(
 ) : IMemoryProviderInstance
 {
     private readonly ILogger _logger = logger;
-    private readonly GraphStore _store = new(settings.GraphPath);
+    private readonly GraphStore _store = GraphStore.GetShared(settings.GraphPath);
     private readonly TextEmbedder _embedder = new();
     private readonly GraphExtractor _graphExtractor = new(logger, settings, textGenAccessor);
     private readonly SemaphoreSlim _graphExtractionGate = new(1, 1);
     private readonly CancellationTokenSource _disposeCts = new();
+    private readonly object _loreIdsSync = new();
+    private readonly HashSet<Guid> _registeredLoreIds = new();
     private Guid? _lastProcessedMessageId;
     private int _maxMemoryTokens;
 
@@ -34,6 +36,7 @@ public class GraphMemoryProviderInstance(
         {
             ProcessGraphFromMemoryRef(entry);
             if (IsGraphJsonOnly(entry.Text)) continue;
+            TrackLoreId(entry.Id);
             var lore = EmbedLore(ToLoreFromMemoryRef(entry));
             _store.UpsertLore(new[] { lore });
         }
@@ -44,7 +47,12 @@ public class GraphMemoryProviderInstance(
     {
         if (!settings.PrefillMemoryWindow) return Task.FromResult(false);
 
-        var entries = CollectMemoryRefsForPrefill();
+        var chatId = messages.FirstOrDefault()?.ChatId;
+        if (chatId.HasValue)
+        {
+            GraphMemoryInbox.IngestForChat(_store, chatId.Value, _logger);
+        }
+        var entries = CollectMemoryRefsForPrefill(chatId);
         var expireIndex = GetExpiry(messages);
         var added = PrefillWindow(characterMemories, entries, settings.MaxMemoryWindowEntries, _maxMemoryTokens, expireIndex);
         return Task.FromResult(added);
@@ -54,6 +62,8 @@ public class GraphMemoryProviderInstance(
     {
         var newMessages = messages.Since(_lastProcessedMessageId, settings.MaxQueryResults).ToArray();
         if (newMessages.Length == 0) return Task.FromResult(false);
+
+        GraphMemoryInbox.IngestForChat(_store, newMessages[0].ChatId, _logger);
 
         var terms = ExtractTerms(newMessages);
         var graphMatches = _store.Search(
@@ -66,7 +76,7 @@ public class GraphMemoryProviderInstance(
             chatId: newMessages[0].ChatId);
         var expireIndex = GetExpiry(messages);
 
-        var candidates = RankMatches(graphMatches);
+        var candidates = RankMatches(graphMatches, activeChatId: newMessages[0].ChatId);
         var changed = InsertCandidates(characterMemories, candidates, expireIndex);
 
         // Agentic: create a deterministic summary lore from the new messages (placeholder until LLM extraction).
@@ -84,6 +94,7 @@ public class GraphMemoryProviderInstance(
 
     public Task<MemorySearchResult[]> SearchAsync(IReadOnlyList<string> values, CancellationToken cancellationToken)
     {
+        var registeredLoreIds = GetRegisteredLoreIdsSnapshot();
         var matches = _store.Search(
             values,
             settings.NeighborLimit,
@@ -93,19 +104,27 @@ public class GraphMemoryProviderInstance(
             settings.DeterministicOnly,
             chatId: null);
         var ranked = RankMatches(matches);
-        var results = ranked.Select((m, i) => new MemorySearchResult { Memory = m, Score = 1.0 - i * 0.01 }).ToArray();
+        var results = ranked
+            .Where(m => registeredLoreIds.Contains(m.Id))
+            .Select((m, i) => new MemorySearchResult { Memory = m, Score = 1.0 - i * 0.01 })
+            .ToArray();
         return Task.FromResult(results);
     }
 
     public Task UpdateMemoriesAsync(Guid[] remove, MemoryRef[] update, MemoryRef[] add, CancellationToken cancellationToken)
     {
-        if (remove.Length > 0) _store.RemoveLore(remove);
+        if (remove.Length > 0)
+        {
+            UntrackLoreIds(remove);
+            _store.RemoveLore(remove);
+        }
         if (update.Length > 0)
         {
             foreach (var entry in update)
             {
                 ProcessGraphFromMemoryRef(entry);
                 if (IsGraphJsonOnly(entry.Text)) continue;
+                TrackLoreId(entry.Id);
                 _store.UpsertLore(new[] { EmbedLore(ToLoreFromMemoryRef(entry)) });
             }
         }
@@ -115,6 +134,7 @@ public class GraphMemoryProviderInstance(
             {
                 ProcessGraphFromMemoryRef(entry);
                 if (IsGraphJsonOnly(entry.Text)) continue;
+                TrackLoreId(entry.Id);
                 _store.UpsertLore(new[] { EmbedLore(ToLoreFromMemoryRef(entry)) });
             }
         }
@@ -131,24 +151,44 @@ public class GraphMemoryProviderInstance(
 
     private List<MemoryRef> CollectMemoryRefsForPrefill()
     {
+        return CollectMemoryRefsForPrefill(chatId: null);
+    }
+
+    private List<MemoryRef> CollectMemoryRefsForPrefill(Guid? chatId)
+    {
+        static bool InScope(Guid? itemChatId, Guid? desiredChatId)
+        {
+            if (!desiredChatId.HasValue) return true;
+            return !itemChatId.HasValue || itemChatId.Value == desiredChatId.Value;
+        }
+
+        var registeredLoreIds = GetRegisteredLoreIdsSnapshot();
         var refs = new List<MemoryRef>();
-        refs.AddRange(_store.Entities.Select(GraphMapping.ToMemoryRef));
-        refs.AddRange(_store.Relations.Select(r =>
+
+        refs.AddRange(_store.Entities.Where(e => InScope(e.ChatId, chatId)).Select(GraphMapping.ToMemoryRef));
+        refs.AddRange(_store.Relations.Where(r => InScope(r.ChatId, chatId)).Select(r =>
         {
             var src = _store.Entities.FirstOrDefault(e => e.Id == r.SourceId);
             var tgt = _store.Entities.FirstOrDefault(e => e.Id == r.TargetId);
             return GraphMapping.ToMemoryRef(r, src, tgt);
         }));
-        refs.AddRange(_store.Lore.Select(GraphMapping.ToMemoryRef));
+        refs.AddRange(_store.Lore
+            .Where(l => registeredLoreIds.Contains(l.Id) && InScope(l.ChatId, chatId))
+            .Select(GraphMapping.ToMemoryRef));
         return refs;
     }
 
-    private List<MemoryRef> RankMatches(GraphSearchResult matches)
+    private List<MemoryRef> RankMatches(GraphSearchResult matches, Guid? activeChatId = null)
     {
+        var registeredLoreIds = GetRegisteredLoreIdsSnapshot();
         var ranked = new List<(MemoryRef mem, double score)>();
 
         foreach (var kv in matches.Lore)
         {
+            var lore = kv.Value.lore;
+            var visible = registeredLoreIds.Contains(lore.Id) ||
+                          (activeChatId.HasValue && lore.ChatId.HasValue && lore.ChatId.Value == activeChatId.Value);
+            if (!visible) continue;
             ranked.Add((GraphMapping.ToMemoryRef(kv.Value.lore), kv.Value.score));
         }
 
@@ -260,12 +300,21 @@ public class GraphMemoryProviderInstance(
     private void ProcessGraphFromMemoryRef(MemoryRef entry)
     {
         if (!settings.EnableGraphExtraction) return;
+
+        if (IsGraphJsonOnly(entry.Text))
+        {
+            _logger.LogDebug("GRAPH_JSON memory item received id={Id}:{NewLine}{Text}",
+                entry.Id,
+                Environment.NewLine,
+                entry.Text);
+        }
+
         var parsed = _graphExtractor.TryParseGraphFromText(entry.Text, _store.Entities, _store.Relations);
         if (parsed == null) return;
 
         if (parsed.Entities.Count > 0 || parsed.Relations.Count > 0)
         {
-            _logger.LogDebug("GRAPH_JSON parsed from memory item id={Id}: entities={Entities} relations={Relations}",
+            _logger.LogInformation("GRAPH_JSON parsed from memory item id={Id}: entities={Entities} relations={Relations}",
                 entry.Id, parsed.Entities.Count, parsed.Relations.Count);
         }
 
@@ -277,6 +326,7 @@ public class GraphMemoryProviderInstance(
     {
         if (!settings.EnableGraphExtraction) return;
         if (settings.GraphExtractionTrigger != GraphExtractionTrigger.EveryTurn) return;
+        if (!_graphExtractor.LiveTextGenAvailable) return;
         if (!_graphExtractionGate.Wait(0)) return;
 
         _ = Task.Run(async () =>
@@ -322,6 +372,35 @@ public class GraphMemoryProviderInstance(
         using var md5 = System.Security.Cryptography.MD5.Create();
         var bytes = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(text));
         return new Guid(bytes);
+    }
+
+    private void TrackLoreId(Guid id)
+    {
+        lock (_loreIdsSync)
+        {
+            _registeredLoreIds.Add(id);
+        }
+    }
+
+    private void UntrackLoreIds(IEnumerable<Guid> ids)
+    {
+        lock (_loreIdsSync)
+        {
+            foreach (var id in ids)
+            {
+                _registeredLoreIds.Remove(id);
+            }
+        }
+    }
+
+    private HashSet<Guid> GetRegisteredLoreIdsSnapshot()
+    {
+        lock (_loreIdsSync)
+        {
+            return _registeredLoreIds.Count == 0
+                ? new HashSet<Guid>()
+                : new HashSet<Guid>(_registeredLoreIds);
+        }
     }
 
     private static bool PrefillWindow(
